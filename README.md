@@ -1,4 +1,4 @@
-# NEO (Non-Explosive Ordinance)
+# NEO (Non-Explosive Ordnance)
 
 Currently, I am still figuring out how to full swap from arduino IDE to ESP-IDF on VSCode.
 
