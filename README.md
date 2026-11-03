@@ -11,6 +11,3 @@ This project will have full functionality once I learn the basics of ESP-IDF in 
   - RC522 RFID reader
   - 4x4 keypad
   - Servo (future addition)
-
-Considering that I spend several hours getting a print statement and a blinking LED, I think that the full transfer
-from Arduino IDE to ESP-IDF in VSCode will take a considerable amoutn of time.
