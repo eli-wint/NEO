@@ -45,6 +45,17 @@ static bool rfid_timer_active = false;
 static bool main_timer_stopped = false;
 static bool timers_finished = false;
 static bool rfid_poll_error_logged = false;
+auto current_time = std::chrono::steady_clock::now();
+
+enum modes {
+    NEO_SETUP, // Keypad input to set timer
+    NEO_ONLINE, // Normal operation, waiting for RFID card
+    NEO_DEFUSING, // RFID card detected, countdown to defuse
+    NEO_OFFLINE, // Timer expired, NEO is offline
+    NEO_IDLE // Game end, waiting for reset
+};
+
+static modes mode = NEO_ONLINE;
 
 static const char *TAG = "MAIN";
 
@@ -75,6 +86,7 @@ esp_err_t readRC522(bool *cardPresent)
 
 extern "C" void loop();
 extern "C" void updateCountdown();
+extern "C" void updateRFIDTimer();
 
 extern "C" void app_main(void)
 {
@@ -85,7 +97,7 @@ extern "C" void app_main(void)
 
     ESP_LOGI(TAG, "Starting N.E.O.");
 
-    // Initialize LCD
+    // Initialize peripherals
     ESP_ERROR_CHECK(lcd.init());
     ESP_ERROR_CHECK(rc522.init());
 
@@ -94,16 +106,28 @@ extern "C" void app_main(void)
 
     // Initialize
     lcd.fillScreen(0x0000);
-    lcd.print("Initializing N.E.O...", 10, 10, 0xFFE0, 0x0000, 2);
+    lcd.print("Initializing N.E.O...", 10, 10, 0xFFE0, 0x0000, 1);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    lcd.print("LCD: Init...", 10, 20, 0xFFE0, 0x0000, 1);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    lcd.print("RC522: Init...", 10, 30, 0xFFE0, 0x0000, 1);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    lcd.print("LCD: OK", 10, 40, 0x07E0, 0x0000, 1);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    lcd.print("RC522: OK", 10, 50, 0x07E0, 0x0000, 1);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     lcd.fillScreen(0x0000);
-    lcd.print("N.E.O. READY", 10, 10, 0xFFE0, 0x0000, 1);
+    lcd.print("N.E.O. ONLINE  ", 10, 10, 0xFFE0, 0x0000, 1);
 
     std::string text = (LEDs ? "LEDs: ON" : "LEDS: OFF");
-    lcd.print(text.c_str(), 10, 30, 0xFFE0, 0x0000, 1);
+    lcd.print(text.c_str(), 10, 20, 0xFFE0, 0x0000, 1);
     text = (Buzzer ? "Buzzer: ON" : "Buzzer: OFF");
-    lcd.print(text.c_str(), 10, 50, 0xFFE0, 0x0000, 1);
+    lcd.print(text.c_str(), 10, 30, 0xFFE0, 0x0000, 1);
 
     start_time = std::chrono::steady_clock::now();
 
@@ -117,51 +141,37 @@ extern "C" void app_main(void)
 
 extern "C" void loop()
 {
-    updateCountdown();
+    switch (mode)
+    {
+        case NEO_SETUP:
+            break;
+        case NEO_ONLINE:
+            updateCountdown();
+            updateRFIDTimer();
+            break;
+        case NEO_DEFUSING:
+            updateCountdown();
+            updateRFIDTimer();
+            break;
+        case NEO_OFFLINE:
+            break;
+        case NEO_IDLE:
+            break;
+        default:
+            mode = NEO_IDLE;
+            break;
+    }
 }
 
 extern "C" void updateCountdown()
 {
+    auto current_time = std::chrono::steady_clock::now();
     if (timers_finished)
     {
         vTaskDelay(pdMS_TO_TICKS(100));
         return;
     }
 
-    bool card_present = false;
-    esp_err_t err = readRC522(&card_present);
-    if (err != ESP_OK)
-    {
-        if (!rfid_poll_error_logged)
-        {
-            ESP_LOGE(TAG, "RC522 poll failed: %s", esp_err_to_name(err));
-            rfid_poll_error_logged = true;
-        }
-    }
-    else
-    {
-        rfid_poll_error_logged = false;
-        auto now = std::chrono::steady_clock::now();
-        if (card_present && !rfid_timer_active)
-        {
-            rfid_timer_active = true;
-            rfid_timer_start = now;
-            ESP_LOGI(TAG, "Card detected; starting 5-second timer");
-        }
-        else if (!card_present && rfid_timer_active)
-        {
-            rfid_timer_active = false;
-            lcd.fillRect(
-                (lcd.getWidth() - RFID_TIMER_TEXT_WIDTH) / 2,
-                RFID_TIMER_TEXT_Y,
-                RFID_TIMER_TEXT_WIDTH,
-                8 * RFID_TIMER_TEXT_SIZE,
-                0x0000);
-            ESP_LOGI(TAG, "Card removed; hiding 5-second timer");
-        }
-    }
-
-    auto current_time = std::chrono::steady_clock::now();
     time_elapsed =
         timer - std::chrono::duration<double>(current_time - start_time).count();
     if (time_elapsed <= 0.0 && !main_timer_stopped)
@@ -182,6 +192,55 @@ extern "C" void updateCountdown()
             << std::setw(2) << std::setfill('0') << ms;
         std::string time = oss.str();
         lcd.print(time.c_str(), 90, 110, 0xFFE0, 0x0000, 3);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(33));
+}
+
+extern "C" void updateRFIDTimer()
+{
+    if (timers_finished)
+    {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        return;
+    }
+
+    auto current_time = std::chrono::steady_clock::now();
+    bool card_present = false;
+    esp_err_t err = readRC522(&card_present);
+    if (err != ESP_OK)
+    {
+        if (!rfid_poll_error_logged)
+        {
+            ESP_LOGE(TAG, "RC522 poll failed: %s", esp_err_to_name(err));
+            rfid_poll_error_logged = true;
+        }
+    }
+    else
+    {
+        rfid_poll_error_logged = false;
+        auto now = std::chrono::steady_clock::now();
+        if (card_present && !rfid_timer_active)
+        {
+            rfid_timer_active = true;
+            rfid_timer_start = now;
+            ESP_LOGI(TAG, "Card detected; starting 5-second timer");
+            lcd.print("N.E.O. DEFUSING", 10, 10, 0xFD20, 0x0000, 1);
+            mode = NEO_DEFUSING;
+        }
+        else if (!card_present && rfid_timer_active)
+        {
+            rfid_timer_active = false;
+            lcd.fillRect(
+                (lcd.getWidth() - RFID_TIMER_TEXT_WIDTH) / 2,
+                RFID_TIMER_TEXT_Y,
+                RFID_TIMER_TEXT_WIDTH,
+                8 * RFID_TIMER_TEXT_SIZE,
+                0x0000);
+            lcd.print("N.E.O. ONLINE  ", 10, 10, 0xFFE0, 0x0000, 1);
+            mode = NEO_ONLINE;
+            ESP_LOGI(TAG, "Card removed; hiding 5-second timer");
+        }
     }
 
     if (rfid_timer_active)
@@ -206,6 +265,8 @@ extern "C" void updateCountdown()
                 0xFFE0,
                 0x0000,
                 RFID_TIMER_TEXT_SIZE);
+                lcd.print("N.E.O. OFFLINE ", 10, 10, 0xF800, 0x0000, 1);
+                mode = NEO_OFFLINE;
             return;
         }
 
@@ -225,6 +286,4 @@ extern "C" void updateCountdown()
             0x0000,
             RFID_TIMER_TEXT_SIZE);
     }
-
-    vTaskDelay(pdMS_TO_TICKS(33));
 }
