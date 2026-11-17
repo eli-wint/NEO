@@ -53,6 +53,15 @@ public:
         const uint16_t *pixels
     );
 
+    esp_err_t print(
+        const char *text,
+        int x,
+        int y,
+        uint16_t textColor = 0xFFE0,
+        uint16_t backgroundColor = 0x0000,
+        uint8_t textSize = 1
+    );
+
     // Display information
     int getWidth() const;
     int getHeight() const;
@@ -82,6 +91,7 @@ private:
     // Initialization helper
     esp_err_t initSPI();
     esp_err_t initPanel();
+    static uint16_t toWireColor(uint16_t color);
 
     // Display dimensions after rotation
     int _width = WIDTH;

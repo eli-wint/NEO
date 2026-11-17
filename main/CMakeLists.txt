@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "Indicators.cpp"
         "LCD.cpp"
+        "RC522.cpp"
 
     INCLUDE_DIRS "."
 
