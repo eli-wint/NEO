@@ -355,16 +355,16 @@ extern "C" void readKeypad()
             }
             break;
         case 'A':
-            timer = 900;
+            timer = 1200;
             break;
         case 'B':
-            timer = 600;
+            timer = 900;
             break;
         case 'C':
-            timer = 300;
+            timer = 600;
             break;
         case 'D':
-            timer = 0;
+            timer = 300;
             break;
         case '*':
             timer = 0;
