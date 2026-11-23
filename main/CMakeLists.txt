@@ -4,6 +4,7 @@ idf_component_register(
         "Indicators.cpp"
         "LCD.cpp"
         "RC522.cpp"
+        "Keypad.cpp"
 
     INCLUDE_DIRS "."
 
@@ -13,4 +14,5 @@ idf_component_register(
         esp_lcd_ili9341
         esp_driver_spi
         esp_driver_gpio
+        esp_timer
 )

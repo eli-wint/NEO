@@ -7,6 +7,7 @@
 
 #include "LCD.h"
 #include "RC522.h"
+#include "Keypad.h"
 
 #include "string"
 #include "chrono"
@@ -39,23 +40,26 @@
 
 std::chrono::steady_clock::time_point start_time;
 double time_elapsed = 0.0;
-double timer = 300.0;
+double timer = 0.0;
 static std::chrono::steady_clock::time_point rfid_timer_start;
 static bool rfid_timer_active = false;
 static bool main_timer_stopped = false;
 static bool timers_finished = false;
 static bool rfid_poll_error_logged = false;
 auto current_time = std::chrono::steady_clock::now();
+static double factors[] = {0.0, 10.0, 10.0, 10.0, 6.0, 10.0}; // Factors for ms-ms, ms-ss, ss-ss, ss-mm, mm-mm
+int factor_index = 0;                                       // Index to track the current factor
 
-enum modes {
-    NEO_SETUP, // Keypad input to set timer
-    NEO_ONLINE, // Normal operation, waiting for RFID card
+enum modes
+{
+    NEO_SETUP,    // Keypad input to set timer
+    NEO_ONLINE,   // Normal operation, waiting for RFID card
     NEO_DEFUSING, // RFID card detected, countdown to defuse
-    NEO_OFFLINE, // Timer expired, NEO is offline
-    NEO_IDLE // Game end, waiting for reset
+    NEO_OFFLINE,  // Timer expired, NEO is offline
+    NEO_IDLE      // Game end, waiting for reset
 };
 
-static modes mode = NEO_ONLINE;
+static modes mode = NEO_SETUP;
 
 static const char *TAG = "MAIN";
 
@@ -70,23 +74,25 @@ LCD lcd(
     LCD_BL);
 
 RC522 rc522(SPI2_HOST, RC522_SDA, RC522_RST);
+Keypad keypad(R1, R2, R3, R4, C1, C2, C3, C4);
 
 namespace
 {
-constexpr double RFID_TIMER_SECONDS = 5.0;
-constexpr int RFID_TIMER_TEXT_SIZE = 2;
-constexpr int RFID_TIMER_TEXT_Y = 145;
-constexpr int RFID_TIMER_TEXT_WIDTH = 6 * RFID_TIMER_TEXT_SIZE * 5;
+    constexpr double RFID_TIMER_SECONDS = 5.0;
+    constexpr int RFID_TIMER_TEXT_SIZE = 2;
+    constexpr int RFID_TIMER_TEXT_Y = 145;
+    constexpr int RFID_TIMER_TEXT_WIDTH = 6 * RFID_TIMER_TEXT_SIZE * 5;
 
-esp_err_t readRC522(bool *cardPresent)
-{
-    return rc522.readCardPresent(cardPresent);
-}
+    esp_err_t readRC522(bool *cardPresent)
+    {
+        return rc522.readCardPresent(cardPresent);
+    }
 }
 
 extern "C" void loop();
 extern "C" void updateCountdown();
 extern "C" void updateRFIDTimer();
+extern "C" void readKeypad();
 
 extern "C" void app_main(void)
 {
@@ -100,6 +106,7 @@ extern "C" void app_main(void)
     // Initialize peripherals
     ESP_ERROR_CHECK(lcd.init());
     ESP_ERROR_CHECK(rc522.init());
+    ESP_ERROR_CHECK(keypad.init());
 
     // Landscape orientation
     ESP_ERROR_CHECK(lcd.setRotation(3));
@@ -129,7 +136,7 @@ extern "C" void app_main(void)
     text = (Buzzer ? "Buzzer: ON" : "Buzzer: OFF");
     lcd.print(text.c_str(), 10, 30, 0xFFE0, 0x0000, 1);
 
-    start_time = std::chrono::steady_clock::now();
+    lcd.print("00:00:00", 90, 110, 0xFFE0, 0x0000, 3);
 
     ESP_LOGI(TAG, "Display test complete");
 
@@ -143,23 +150,24 @@ extern "C" void loop()
 {
     switch (mode)
     {
-        case NEO_SETUP:
-            break;
-        case NEO_ONLINE:
-            updateCountdown();
-            updateRFIDTimer();
-            break;
-        case NEO_DEFUSING:
-            updateCountdown();
-            updateRFIDTimer();
-            break;
-        case NEO_OFFLINE:
-            break;
-        case NEO_IDLE:
-            break;
-        default:
-            mode = NEO_IDLE;
-            break;
+    case NEO_SETUP:
+        readKeypad();
+        break;
+    case NEO_ONLINE:
+        updateCountdown();
+        updateRFIDTimer();
+        break;
+    case NEO_DEFUSING:
+        updateCountdown();
+        updateRFIDTimer();
+        break;
+    case NEO_OFFLINE:
+        break;
+    case NEO_IDLE:
+        break;
+    default:
+        mode = NEO_IDLE;
+        break;
     }
 }
 
@@ -265,8 +273,8 @@ extern "C" void updateRFIDTimer()
                 0xFFE0,
                 0x0000,
                 RFID_TIMER_TEXT_SIZE);
-                lcd.print("N.E.O. OFFLINE ", 10, 10, 0xF800, 0x0000, 1);
-                mode = NEO_OFFLINE;
+            lcd.print("N.E.O. OFFLINE ", 10, 10, 0xF800, 0x0000, 1);
+            mode = NEO_OFFLINE;
             return;
         }
 
@@ -286,4 +294,102 @@ extern "C" void updateRFIDTimer()
             0x0000,
             RFID_TIMER_TEXT_SIZE);
     }
+}
+
+extern "C" void readKeypad()
+{
+    /* Timer ms-ms = 10*ms
+       Timer ms-ss = 10*ms
+       Timer ss-ss = 10*ss
+       Timer ss-mm = 6*ss
+       Timer mm-mm = 60*mm
+    */
+    char key = '\0';
+    esp_err_t err = keypad.readKey(&key);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Keypad read failed: %s", esp_err_to_name(err));
+    }
+    else if (key != '\0')
+    {
+        double add = 0.0;
+        switch (key)
+        {
+        case '9':
+            add += 0.01;
+            [[fallthrough]];
+        case '8':
+            add += 0.01;
+            [[fallthrough]];
+        case '7':
+            add += 0.01;
+            [[fallthrough]];
+        case '6':
+            add += 0.01;
+            [[fallthrough]];
+        case '5':
+            add += 0.01;
+            [[fallthrough]];
+        case '4':
+            add += 0.01;
+            [[fallthrough]];
+        case '3':
+            add += 0.1;
+            [[fallthrough]];
+        case '2':
+            add += 0.01;
+            [[fallthrough]];
+        case '1':
+            add += 0.01;
+            [[fallthrough]];
+        case '0':
+            if (factor_index <= 5)
+            {
+                timer *= factors[factor_index];
+                factor_index++;
+                timer += add;
+            }
+            else
+            {
+                ESP_LOGW(TAG, "Maximum factor index reached; ignoring input");
+            }
+            break;
+        case 'A':
+            timer = 900;
+            break;
+        case 'B':
+            timer = 600;
+            break;
+        case 'C':
+            timer = 300;
+            break;
+        case 'D':
+            timer = 0;
+            break;
+        case '*':
+            timer = 0;
+            factor_index = 0;
+            break;
+        case '#':
+            timer = timer;
+            mode = NEO_ONLINE;
+            start_time = std::chrono::steady_clock::now();
+            break;
+        default:
+            break;
+        }
+        std::ostringstream oss;
+        int mm = static_cast<int>(timer / 60);
+        int ss = static_cast<int>(timer) % 60;
+        int ms = static_cast<int>(timer * 100) % 100;
+        oss << std::setw(2) << std::setfill('0') << mm << ":"
+            << std::setw(2) << std::setfill('0') << ss << ":"
+            << std::setw(2) << std::setfill('0') << ms;
+        std::string time = oss.str();
+        lcd.print(time.c_str(), 90, 110, 0xFFE0, 0x0000, 3);
+
+        ESP_LOGI(TAG, "Keypad input: %c, Timer: %.2f seconds", key, timer);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
 }
