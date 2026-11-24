@@ -12,6 +12,7 @@
 #include "string"
 #include "chrono"
 #include "iomanip"
+#include <cmath>
 
 // SPI GPIO configuration
 #define SPI_SCK GPIO_NUM_12
@@ -47,8 +48,8 @@ static bool main_timer_stopped = false;
 static bool timers_finished = false;
 static bool rfid_poll_error_logged = false;
 auto current_time = std::chrono::steady_clock::now();
-static double factors[] = {0.0, 10.0, 10.0, 10.0, 6.0, 10.0}; // Factors for ms-ms, ms-ss, ss-ss, ss-mm, mm-mm
-int factor_index = 0;                                       // Index to track the current factor
+static std::string timer_input;
+static std::string valid_keys[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
 
 enum modes
 {
@@ -298,12 +299,6 @@ extern "C" void updateRFIDTimer()
 
 extern "C" void readKeypad()
 {
-    /* Timer ms-ms = 10*ms
-       Timer ms-ss = 10*ms
-       Timer ss-ss = 10*ss
-       Timer ss-mm = 6*ss
-       Timer mm-mm = 60*mm
-    */
     char key = '\0';
     esp_err_t err = keypad.readKey(&key);
     if (err != ESP_OK)
@@ -312,76 +307,63 @@ extern "C" void readKeypad()
     }
     else if (key != '\0')
     {
-        double add = 0.0;
-        switch (key)
+        if (key >= '0' && key <= '9')
         {
-        case '9':
-            add += 0.01;
-            [[fallthrough]];
-        case '8':
-            add += 0.01;
-            [[fallthrough]];
-        case '7':
-            add += 0.01;
-            [[fallthrough]];
-        case '6':
-            add += 0.01;
-            [[fallthrough]];
-        case '5':
-            add += 0.01;
-            [[fallthrough]];
-        case '4':
-            add += 0.01;
-            [[fallthrough]];
-        case '3':
-            add += 0.1;
-            [[fallthrough]];
-        case '2':
-            add += 0.01;
-            [[fallthrough]];
-        case '1':
-            add += 0.01;
-            [[fallthrough]];
-        case '0':
-            if (factor_index <= 5)
+            if (timer_input.size() < 6)
             {
-                timer *= factors[factor_index];
-                factor_index++;
-                timer += add;
+                timer_input += key;
+                std::string digits(6 - timer_input.size(), '0');
+                digits += timer_input;
+                const int minutes =
+                    (digits[0] - '0') * 10 + (digits[1] - '0');
+                const int seconds =
+                    (digits[2] - '0') * 10 + (digits[3] - '0');
+                const int centiseconds =
+                    (digits[4] - '0') * 10 + (digits[5] - '0');
+                timer =
+                    minutes * 60 + seconds + centiseconds / 100.0;
             }
             else
             {
-                ESP_LOGW(TAG, "Maximum factor index reached; ignoring input");
+                ESP_LOGW(TAG, "Maximum timer input length reached; ignoring input");
             }
-            break;
-        case 'A':
-            timer = 1200;
-            break;
-        case 'B':
-            timer = 900;
-            break;
-        case 'C':
-            timer = 600;
-            break;
-        case 'D':
-            timer = 300;
-            break;
-        case '*':
-            timer = 0;
-            factor_index = 0;
-            break;
-        case '#':
-            timer = timer;
-            mode = NEO_ONLINE;
-            start_time = std::chrono::steady_clock::now();
-            break;
-        default:
-            break;
+        }
+        else
+        {
+            switch (key)
+            {
+            case 'A':
+                timer = 1200;
+                timer_input.clear();
+                break;
+            case 'B':
+                timer = 900;
+                timer_input.clear();
+                break;
+            case 'C':
+                timer = 600;
+                timer_input.clear();
+                break;
+            case 'D':
+                timer = 300;
+                timer_input.clear();
+                break;
+            case '*':
+                timer = 0;
+                timer_input.clear();
+                break;
+            case '#':
+                mode = NEO_ONLINE;
+                start_time = std::chrono::steady_clock::now();
+                break;
+            default:
+                break;
+            }
         }
         std::ostringstream oss;
         int mm = static_cast<int>(timer / 60);
         int ss = static_cast<int>(timer) % 60;
-        int ms = static_cast<int>(timer * 100) % 100;
+        int ms = static_cast<int>(std::lround(timer * 100)) % 100;
         oss << std::setw(2) << std::setfill('0') << mm << ":"
             << std::setw(2) << std::setfill('0') << ss << ":"
             << std::setw(2) << std::setfill('0') << ms;
