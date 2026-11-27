@@ -42,9 +42,9 @@
 #define C4 GPIO_NUM_1
 
 // 24v Rail GPIO configuration
-#define LED_R GPIO_NUM_41
+#define LED_R GPIO_NUM_43
 #define LED_G GPIO_NUM_42
-#define LED_W GPIO_NUM_43
+#define LED_W GPIO_NUM_41
 #define BUZZER GPIO_NUM_44
 
 // User input GPIO configuration
